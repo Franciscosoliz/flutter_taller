@@ -8,7 +8,7 @@ Aplicacion movil multiplataforma desarrollada en Flutter para la gestion y segui
 
 | Login & Autenticacion | Panel Principal | Ordenes & Servicios |
 | :---: | :---: | :---: |
-| ![Login](https://via.placeholder.com/200x400?text=Login) | ![Home](https://via.placeholder.com/200x400?text=Home) | ![Orders](https://via.placeholder.com/200x400?text=Orders) |
+| <img width="230" alt="Login" src="https://github.com/user-attachments/assets/828df624-847d-4513-b922-b555de597a5f" /> | <img width="230" alt="Panel Principal" src="https://github.com/user-attachments/assets/c08db8ae-fd7e-4886-9e43-4d3c4a25fefb" /> | <img width="230" alt="Ordenes" src="https://github.com/user-attachments/assets/1f805ee8-88a1-46e6-8de7-91f4685a9d25" /> |
 
 ---
 
