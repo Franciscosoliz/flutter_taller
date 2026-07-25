@@ -22,28 +22,70 @@ class AuthRemoteDatasourceImpl implements AuthRemoteDatasource {
   @override
   Future<LoggedUser> login(String username, String password) async {
     try {
-      // 🔄 Cambiado de '/auth/login/' a '/token/'
-      final res  = await _dio.post(
+      final res = await _dio.post(
         '/token/',
         data: {'username': username, 'password': password},
       );
       final data = res.data as Map<String, dynamic>;
-      
-      // Guardar Tokens (SimpleJWT devuelve 'access' y 'refresh')
-      await _storage.saveTokens(
-        data['access'] as String,
-        data['refresh'] as String,
-      );
-      
-      // Guardar datos básicos del usuario de forma segura
+
+      // 1. Guardar Tokens recibidos desde SimpleJWT
+      final access = data['access'] as String? ?? '';
+      final refresh = data['refresh'] as String? ?? '';
+      await _storage.saveTokens(access, refresh);
+
+      // 2. Determinar si es usuario administrador por el username ingresado
+      final String cleanUsername = (data['username'] as String? ?? username).trim();
+      final bool esAdmin = cleanUsername.toLowerCase() == 'taller' || 
+                           cleanUsername.toLowerCase() == 'admin';
+
+      // Parseo flexible por si en algún momento el backend llega a mandar el campo
+      final rawStaff = data['is_staff'] ?? data['isStaff'];
+      final bool isStaffVal = esAdmin ||
+          rawStaff == true ||
+          rawStaff.toString().toLowerCase() == 'true' ||
+          rawStaff.toString() == '1';
+
+      final userId = data['user_id'] is int
+          ? data['user_id'] as int
+          : int.tryParse(data['user_id']?.toString() ?? '') ?? 1;
+
+      final String rolDetectado = (data['rol'] ?? data['role'] ?? '').toString();
+      final String rolFinal = rolDetectado.isNotEmpty 
+          ? rolDetectado 
+          : (esAdmin ? 'Administrador' : 'CLIENTE');
+
+      // 3. Guardar en almacenamiento seguro
       await _storage.saveUser(
-        id:       data['user_id'] as int? ?? data['id'] as int? ?? 0,
-        username: data['username'] as String? ?? username, // Fallback al username ingresado
-        email:    data['email']    as String? ?? '',
-        isStaff:  data['is_staff'] as bool? ?? false,
+        id: userId,
+        username: cleanUsername,
+        email: data['email'] as String? ?? '',
+        isStaff: isStaffVal,
+        rol: rolFinal,
       );
-      
-      return LoggedUser.fromJson(data);
+
+      // 4. Mapear objeto LoggedUser para el AuthNotifier
+      final Map<String, dynamic> userPayload = {
+        'id': userId,
+        'user_id': userId,
+        'username': cleanUsername,
+        'email': data['email'] as String? ?? '',
+        'is_staff': isStaffVal,
+        'rol': rolFinal,
+        'access': access,
+        'refresh': refresh,
+      };
+
+      final user = LoggedUser.fromJson(userPayload);
+
+      print('==================================================');
+      print('=== LOGIN EXITOSO CON REGLA DE USUARIO ===');
+      print('=== Username: ${user.username}');
+      print('=== IsStaff: ${user.isStaff}');
+      print('=== Rol: ${user.rol}');
+      print('=== IsAdminOrStaff: ${user.isAdminOrStaff}');
+      print('==================================================');
+
+      return user;
     } on DioException catch (e) {
       throw ApiException.fromDioError(e);
     }
@@ -68,19 +110,31 @@ class AuthRemoteDatasourceImpl implements AuthRemoteDatasource {
       );
       final data = res.data as Map<String, dynamic>;
 
-      await _storage.saveTokens(
-        data['access'] as String,
-        data['refresh'] as String,
-      );
+      final access = data['access'] as String? ?? '';
+      final refresh = data['refresh'] as String? ?? '';
+      await _storage.saveTokens(access, refresh);
+
+      final String cleanUsername = (data['username'] as String? ?? username).trim();
 
       await _storage.saveUser(
-        id:       data['user_id'] as int? ?? data['id'] as int? ?? 0,
-        username: data['username'] as String? ?? username,
-        email:    data['email']    as String? ?? email,
-        isStaff:  data['is_staff'] as bool? ?? false,
+        id: 0,
+        username: cleanUsername,
+        email: email,
+        isStaff: false,
+        rol: 'CLIENTE',
       );
 
-      return LoggedUser.fromJson(data);
+      final Map<String, dynamic> userPayload = {
+        'id': 0,
+        'username': cleanUsername,
+        'email': email,
+        'is_staff': false,
+        'rol': 'CLIENTE',
+        'access': access,
+        'refresh': refresh,
+      };
+
+      return LoggedUser.fromJson(userPayload);
     } on DioException catch (e) {
       throw ApiException.fromDioError(e);
     }
@@ -94,7 +148,7 @@ class AuthRemoteDatasourceImpl implements AuthRemoteDatasource {
         await _dio.post('/token/verify/', data: {'token': refresh});
       }
     } catch (_) {
-      // Limpieza local en caso de fallo remoto
+      // Limpieza local en caso de fallo de red
     } finally {
       await _storage.clearSession();
     }

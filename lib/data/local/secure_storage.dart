@@ -36,16 +36,18 @@ class SecureStorage {
     required String username,
     required String email,
     required bool isStaff,
-    String? role,
+    String? rol,
   }) async {
     await _storage.write(key: _keyUserId, value: id.toString());
     await _storage.write(key: _keyUsername, value: username);
     await _storage.write(key: _keyEmail, value: email);
     await _storage.write(key: _keyIsStaff, value: isStaff.toString());
-    await _storage.write(
-      key: _keyRole,
-      value: role ?? (isStaff ? 'ADMIN' : 'CLIENTE'),
-    );
+    
+    final valorRol = (rol != null && rol.isNotEmpty) 
+        ? rol 
+        : (isStaff ? 'Administrador' : 'CLIENTE');
+        
+    await _storage.write(key: _keyRole, value: valorRol);
   }
 
   Future<Map<String, String>?> getUser() async {
@@ -53,7 +55,7 @@ class SecureStorage {
     final username = await _storage.read(key: _keyUsername);
     final email = await _storage.read(key: _keyEmail);
     final isStaff = await _storage.read(key: _keyIsStaff);
-    final role = await _storage.read(key: _keyRole);
+    final rol = await _storage.read(key: _keyRole);
 
     if (id == null || username == null) return null;
 
@@ -62,7 +64,9 @@ class SecureStorage {
       'username': username,
       'email': email ?? '',
       'is_staff': isStaff ?? 'false',
-      'role': role ?? ((isStaff == 'true') ? 'ADMIN' : 'CLIENTE'),
+      'rol': (rol != null && rol.isNotEmpty)
+          ? rol
+          : ((isStaff == 'true') ? 'Administrador' : 'CLIENTE'),
     };
   }
 

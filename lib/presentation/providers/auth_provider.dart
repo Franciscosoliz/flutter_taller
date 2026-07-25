@@ -31,16 +31,21 @@ class AuthNotifier extends StateNotifier<AuthState> {
         return;
       }
 
+      final isStaffVal =
+          userData['is_staff'] == 'true' || userData['is_staff'] == '1';
+
+      final rolGuardado = userData['rol'] ?? '';
+
       final user = LoggedUser(
         id: userData['user_id'] is int
             ? userData['user_id'] as int
             : int.parse(userData['user_id'].toString()),
         username: userData['username'].toString(),
         email: userData['email'].toString(),
-        isStaff: userData['is_staff'] == true ||
-            userData['is_staff'].toString() == 'true',
-        role: userData['role']?.toString() ??
-            ((userData['is_staff'] == true) ? 'ADMIN' : 'CLIENTE'),
+        isStaff: isStaffVal,
+        rol: rolGuardado.isNotEmpty
+            ? rolGuardado
+            : (isStaffVal ? 'Administrador' : 'CLIENTE'),
       );
 
       state = AuthState.authenticated(user);
@@ -54,6 +59,25 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = const AuthState.checking();
     try {
       final user = await _datasource.login(username.trim(), password);
+
+      // 🔍 DEBUG: Guardado en SecureStorage
+      print('=== 3. GUARDANDO EN SECURE STORAGE ===');
+      print('=== Rol a guardar: ${user.rol}');
+
+      await _storage.saveUser(
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        isStaff: user.isStaff,
+        rol: user.rol, // 👈 Aseguramos que pase el rol
+      );
+
+      // Verificar lo que quedó en Storage
+      final savedData = await _storage.getUser();
+      print('=== 4. LEÍDO DIRECTO DE SECURE STORAGE ===');
+      print('=== Storage rol: ${savedData?['rol']}');
+      print('==================================================');
+
       state = AuthState.authenticated(user);
     } on ApiException catch (e) {
       state = AuthState.unauthenticated(e.message);
@@ -90,15 +114,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   // Cierre de sesión y limpieza de tokens
-  // Logout
   Future<void> logout() async {
     try {
       await _datasource.logout();
     } catch (_) {
       // Ignoramos errores de red durante el logout
     } finally {
-      // Llamamos al método de borrado de sesión disponible en SecureStorage
-      await _storage.clearSession(); // o _storage.deleteAll() según tu clase
+      await _storage.clearSession();
       state = const AuthState.unauthenticated();
     }
   }
@@ -111,9 +133,27 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 }
 
+// -----------------------------------------------------------------------------
+// PROVIDERS DE RIVERPOD
+// -----------------------------------------------------------------------------
+
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   return AuthNotifier(
     ref.watch(authDatasourceProvider),
     ref.watch(secureStorageProvider),
   );
+});
+
+/// Retorna true si el usuario autenticado tiene el flag isStaff o rol Administrador
+final isStaffProvider = Provider<bool>((ref) {
+  final user = ref.watch(authProvider).user;
+  if (user == null) return false;
+
+  return user.isAdminOrStaff;
+});
+
+/// Retorna el rol del usuario ('Administrador', 'CLIENTE', etc.)
+final userRoleProvider = Provider<String>((ref) {
+  final authState = ref.watch(authProvider);
+  return authState.user?.rol ?? 'CLIENTE';
 });

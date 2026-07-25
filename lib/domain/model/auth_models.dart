@@ -29,7 +29,7 @@ class LoggedUser {
   final String username;
   final String email;
   final bool isStaff;
-  final String role;
+  final String rol;
   final String? accessToken;
   final String? refreshToken;
 
@@ -38,22 +38,37 @@ class LoggedUser {
     required this.username,
     required this.email,
     required this.isStaff,
-    this.role = 'CLIENTE',
+    this.rol = 'CLIENTE',
     this.accessToken,
     this.refreshToken,
   });
 
+  bool get isAdminOrStaff {
+    final rolNormalizado = rol.toLowerCase().trim();
+    return isStaff ||
+        rolNormalizado == 'administrador' ||
+        rolNormalizado == 'admin' ||
+        rolNormalizado == 'empleado' ||
+        rolNormalizado == 'staff';
+  }
+
   // Constructor factory principal para JSON
   factory LoggedUser.fromJson(Map<String, dynamic> json) {
     final isStaffVal = (json['is_staff'] ?? false) == true ||
-        json['is_staff'].toString() == 'true';
+        json['is_staff'].toString().toLowerCase() == 'true' ||
+        json['is_staff'].toString() == '1';
+
+    // Obtención del campo "rol" proveniente de Django
+    final String rolDetectado = (json['rol'] ?? json['role'] ?? '').toString();
 
     return LoggedUser(
       id: json['user_id'] as int? ?? json['id'] as int? ?? 0,
       username: (json['username'] ?? '') as String,
       email: (json['email'] ?? '') as String,
       isStaff: isStaffVal,
-      role: json['role']?.toString() ?? (isStaffVal ? 'ADMIN' : 'CLIENTE'),
+      rol: rolDetectado.isNotEmpty
+          ? rolDetectado
+          : (isStaffVal ? 'Administrador' : 'CLIENTE'),
       accessToken: json['access'] as String?,
       refreshToken: json['refresh'] as String?,
     );
@@ -69,7 +84,7 @@ class LoggedUser {
       'username': username,
       'email': email,
       'is_staff': isStaff,
-      'role': role,
+      'rol': rol,
       if (accessToken != null) 'access': accessToken,
       if (refreshToken != null) 'refresh': refreshToken,
     };

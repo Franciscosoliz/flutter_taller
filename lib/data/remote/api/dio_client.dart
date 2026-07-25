@@ -58,7 +58,7 @@ class AuthInterceptor extends Interceptor {
 
     try {
       final refreshResponse = await _dio.post(
-        '/auth/token/refresh/',
+        '/token/refresh/',
         data: {'refresh': refresh},
         options: Options(extra: {'_retry': true}),
       );

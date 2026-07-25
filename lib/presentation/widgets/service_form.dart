@@ -4,7 +4,6 @@ import '../../theme/app_colors.dart';
 import '../../core/utils/validators.dart';
 import '../../domain/model/service.dart';
 import '../providers/services_admin_provider.dart';
-import '../../data/remote/api/service_remote_datasource.dart';
 
 Future<void> showServiceForm(
   BuildContext context,
@@ -41,10 +40,8 @@ class _ServiceFormSheetState extends ConsumerState<ServiceFormSheet> {
   final _priceCtrl = TextEditingController();
   final _imageCtrl = TextEditingController();
   
-  int? _selectedCategoryId;
   bool _isActive = true;
-  List<ServiceCategory> _categories = [];
-  bool _loadingCategories = true;
+  bool _isVisiblePublicly = true;
 
   @override
   void initState() {
@@ -55,23 +52,7 @@ class _ServiceFormSheetState extends ConsumerState<ServiceFormSheet> {
       _descCtrl.text = s.description;
       _priceCtrl.text = s.price > 0 ? s.price.toStringAsFixed(2) : '';
       _imageCtrl.text = s.imageUrl ?? '';
-      _selectedCategoryId = s.category?.id;
       _isActive = s.isActive;
-    }
-    _loadCategories();
-  }
-
-  Future<void> _loadCategories() async {
-    try {
-      final cats = await ref.read(serviceDatasourceProvider).getCategories();
-      if (mounted) {
-        setState(() {
-          _categories = cats;
-          _loadingCategories = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loadingCategories = false);
     }
   }
 
@@ -87,13 +68,14 @@ class _ServiceFormSheetState extends ConsumerState<ServiceFormSheet> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
+    // 🎯 Mapeo directo con las llaves que exige la API de Django
     final payload = <String, dynamic>{
-      'name': _nameCtrl.text.trim(),
-      'description': _descCtrl.text.trim(),
-      'price': double.parse(_priceCtrl.text.trim()),
-      'is_active': _isActive,
-      if (_selectedCategoryId != null) 'category_id': _selectedCategoryId,
-      if (_imageCtrl.text.trim().isNotEmpty) 'image_url': _imageCtrl.text.trim(),
+      'nombre': _nameCtrl.text.trim(),
+      'descripcion': _descCtrl.text.trim(),
+      'precio_referencial': _priceCtrl.text.trim(),
+      'activo': _isActive,
+      'visible_publicamente': _isVisiblePublicly,
+      if (_imageCtrl.text.trim().isNotEmpty) 'foto': _imageCtrl.text.trim(),
     };
 
     if (widget.initial != null) {
@@ -176,27 +158,6 @@ class _ServiceFormSheetState extends ConsumerState<ServiceFormSheet> {
                     style: const TextStyle(color: AppColors.textPrimary),
                     validator: (v) => validateRequired(v, 'Nombre'),
                   ),
-                  const SizedBox(height: 14),
-                  _loadingCategories
-                      ? const LinearProgressIndicator(color: AppColors.accent)
-                      : DropdownButtonFormField<int>(
-                          value: _selectedCategoryId,
-                          decoration: const InputDecoration(
-                            labelText: 'Categoría / Especialidad',
-                            hintText: 'Seleccionar categoría',
-                          ),
-                          dropdownColor: AppColors.surface,
-                          style: const TextStyle(color: AppColors.textPrimary),
-                          items: _categories.map((cat) {
-                            return DropdownMenuItem<int>(
-                              value: cat.id,
-                              child: Text(cat.name),
-                            );
-                          }).toList(),
-                          onChanged: isSaving
-                              ? null
-                              : (val) => setState(() => _selectedCategoryId = val),
-                        ),
                   const SizedBox(height: 14),
                   TextFormField(
                     controller: _priceCtrl,
