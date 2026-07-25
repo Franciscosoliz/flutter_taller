@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import '../../domain/model/employee.dart';
-import 'auth_provider.dart';
+import '../../data/local/secure_storage.dart'; // 👈 Importamos SecureStorage
 
 class EmployeesAdminState {
   final List<Employee> employees;
@@ -26,8 +26,8 @@ class EmployeesAdminState {
     final query = search.toLowerCase();
     return employees.where((e) {
       return e.userName.toLowerCase().contains(query) ||
-             e.role.toLowerCase().contains(query) ||
-             e.phone.contains(query);
+          e.role.toLowerCase().contains(query) ||
+          e.phone.contains(query);
     }).toList();
   }
 
@@ -50,83 +50,116 @@ class EmployeesAdminState {
 
 class EmployeesAdminNotifier extends StateNotifier<EmployeesAdminState> {
   final Ref _ref;
+  final SecureStorage _storage; // 👈 Dependencia de SecureStorage
 
-  // Base URL obtenida del entorno real expuesto en los logs
   static const String baseUrl = 'http://165.227.99.251/api';
 
-  EmployeesAdminNotifier(this._ref) : super(EmployeesAdminState()) {
-    load();
+  EmployeesAdminNotifier(this._ref, this._storage)
+      : super(EmployeesAdminState()) {
+    Future.microtask(() => load());
   }
 
-  // Obtención segura del Token desde AuthState
-  Map<String, String> _getHeaders() {
-    final authState = _ref.read(authProvider);
-    
-    // Si en AuthState el getter se llama diferente, ajusta esta línea (ej. authState.accessToken o authState.user?.token)
-    final dynamic rawToken = (authState as dynamic).token ?? 
-                             (authState as dynamic).accessToken ?? 
-                             (authState as dynamic).user?.token;
+  // Obtener headers de manera asíncrona usando SecureStorage
+  Future<Map<String, String>> _getHeaders() async {
+    final token =
+        await _storage.getAccess(); // 👈 Obtenemos el token real y activo
 
     return {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      if (rawToken != null) 'Authorization': 'Bearer $rawToken',
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
   }
 
-  // 1. CARGAR EMPLEADOS Y USUARIOS (GET)
+  // 1. CARGAR EMPLEADOS Y USUARIOS
   Future<void> load() async {
     state = state.copyWith(isLoading: true, error: null);
-    try {
-      final headers = _getHeaders();
 
-      // Petición a la API de Empleados con tamaño de página ampliado
+    try {
+      final headers = await _getHeaders(); // 👈 Llamada asíncrona de headers
+
       final empRes = await http.get(
         Uri.parse('$baseUrl/empleados/?page_size=100'),
         headers: headers,
       );
 
-      // Petición a la API de Usuarios para selección en formulario
-      final usersRes = await http.get(
-        Uri.parse('$baseUrl/usuarios/?page_size=100'),
-        headers: headers,
-      );
+      if (empRes.statusCode != 200) {
+        state = state.copyWith(
+          isLoading: false,
+          error:
+              'Error al obtener empleados (${empRes.statusCode}): ${empRes.body}',
+        );
+        return;
+      }
 
-      if (empRes.statusCode == 200) {
-        final decodedBody = jsonDecode(empRes.body);
-        
-        // Manejo flexible: Si el backend retorna {"results": [...]} o una List directa [...]
-        final List dynamicEmployees = decodedBody is Map && decodedBody.containsKey('results')
-            ? decodedBody['results']
-            : decodedBody;
+      final decodedBody = jsonDecode(empRes.body);
+      final List dynamicEmployees =
+          (decodedBody is Map && decodedBody.containsKey('results'))
+              ? decodedBody['results']
+              : decodedBody;
 
-        final employees = dynamicEmployees.map((e) => Employee.fromJson(e)).toList();
+      final employees = <Employee>[];
+      for (var i = 0; i < dynamicEmployees.length; i++) {
+        try {
+          final emp = Employee.fromJson(dynamicEmployees[i]);
+          employees.add(emp);
+        } catch (_) {}
+      }
 
-        List<UserOption> users = [];
+      // Cargar usuarios
+      List<UserOption> users = [];
+      try {
+        print(
+            '>>> [DEBUG] Solicitando usuarios a: $baseUrl/usuarios/?page_size=100');
+        final usersRes = await http.get(
+          Uri.parse('$baseUrl/usuarios/?page_size=100'),
+          headers: headers,
+        );
+
+        print('>>> [DEBUG] Usuarios Status Code: ${usersRes.statusCode}');
+        print('>>> [DEBUG] Usuarios Body crudo: ${usersRes.body}');
+
         if (usersRes.statusCode == 200) {
           final decodedUsers = jsonDecode(usersRes.body);
-          final List dynamicUsers = decodedUsers is Map && decodedUsers.containsKey('results')
-              ? decodedUsers['results']
-              : decodedUsers;
+          final List dynamicUsers =
+              (decodedUsers is Map && decodedUsers.containsKey('results'))
+                  ? decodedUsers['results']
+                  : decodedUsers;
 
-          users = dynamicUsers.map((u) => UserOption.fromJson(u)).toList();
+          for (var i = 0; i < dynamicUsers.length; i++) {
+            try {
+              final userOpt = UserOption.fromJson(dynamicUsers[i]);
+              print(
+                  '>>> [DEBUG USER $i] Username: ${userOpt.username} | Rol devuelto: "${userOpt.rol}"');
+
+              // Aceptamos cualquier variante en mayúsculas/minúsculas para depurar
+              if (userOpt.rol.toUpperCase().contains('EMPLEADO') ||
+                  userOpt.rol.toUpperCase() == 'EMPLOYEE') {
+                users.add(userOpt);
+                print(
+                    '>>> [CHECK] Usuario añadido con éxito: ${userOpt.username}');
+              } else {
+                print(
+                    '>>> [WARN] Usuario descartado por rol no coincidente: ${userOpt.username} (Rol: ${userOpt.rol})');
+              }
+            } catch (eUserItem) {
+              print('>>> [ERROR MAPPING USUARIO en índice $i]: $eUserItem');
+            }
+          }
         }
-
-        state = state.copyWith(
-          employees: employees,
-          availableUsers: users,
-          isLoading: false,
-        );
-      } else {
-        state = state.copyWith(
-          isLoading: false,
-          error: 'Error al obtener empleados (${empRes.statusCode})',
-        );
+      } catch (userErr) {
+        print('>>> [DEBUG] Error al cargar usuarios: $userErr');
       }
-    } catch (e) {
+
+      state = state.copyWith(
+        employees: employees,
+        availableUsers: users,
+        isLoading: false,
+      );
+    } catch (e, stackTrace) {
       state = state.copyWith(
         isLoading: false,
-        error: 'Error de conexión con el servidor',
+        error: 'Error al procesar datos: $e',
       );
     }
   }
@@ -135,14 +168,13 @@ class EmployeesAdminNotifier extends StateNotifier<EmployeesAdminState> {
     state = state.copyWith(search: query);
   }
 
-  // 2. CREAR O ACTUALIZAR EMPLEADO (POST / PUT)
   Future<bool> saveEmployee(Employee employee) async {
     try {
-      final headers = _getHeaders();
-      final isEditing = state.employees.any((e) => e.id == employee.id && employee.id > 0);
+      final headers = await _getHeaders();
+      final isEditing =
+          state.employees.any((e) => e.id == employee.id && employee.id > 0);
 
       http.Response response;
-
       if (isEditing) {
         response = await http.put(
           Uri.parse('$baseUrl/empleados/${employee.id}/'),
@@ -162,7 +194,8 @@ class EmployeesAdminNotifier extends StateNotifier<EmployeesAdminState> {
         await load();
         return true;
       } else {
-        state = state.copyWith(error: 'No se pudo guardar el empleado');
+        state = state.copyWith(
+            error: 'No se pudo guardar (${response.statusCode})');
         return false;
       }
     } catch (e) {
@@ -171,10 +204,9 @@ class EmployeesAdminNotifier extends StateNotifier<EmployeesAdminState> {
     }
   }
 
-  // 3. CAMBIAR ESTADO ACTIVO/INACTIVO (PATCH)
   Future<void> toggleActive(int id, bool value) async {
     try {
-      final headers = _getHeaders();
+      final headers = await _getHeaders();
       final response = await http.patch(
         Uri.parse('$baseUrl/empleados/$id/'),
         headers: headers,
@@ -204,10 +236,9 @@ class EmployeesAdminNotifier extends StateNotifier<EmployeesAdminState> {
     }
   }
 
-  // 4. ELIMINAR EMPLEADO (DELETE)
   Future<void> deleteEmployee(int id) async {
     try {
-      final headers = _getHeaders();
+      final headers = await _getHeaders();
       final response = await http.delete(
         Uri.parse('$baseUrl/empleados/$id/'),
         headers: headers,
@@ -217,15 +248,19 @@ class EmployeesAdminNotifier extends StateNotifier<EmployeesAdminState> {
         final list = state.employees.where((e) => e.id != id).toList();
         state = state.copyWith(employees: list);
       } else {
-        state = state.copyWith(error: 'Error al eliminar el empleado');
+        state = state.copyWith(error: 'Error al eliminar');
       }
     } catch (e) {
-      state = state.copyWith(error: 'Error de red al eliminar');
+      state = state.copyWith(error: 'Error de red');
     }
   }
 }
 
 final employeesAdminProvider =
     StateNotifierProvider<EmployeesAdminNotifier, EmployeesAdminState>((ref) {
-  return EmployeesAdminNotifier(ref);
+  return EmployeesAdminNotifier(
+    ref,
+    ref.watch(
+        secureStorageProvider), // 👈 Inyectamos el provider de almacenamiento seguro
+  );
 });
